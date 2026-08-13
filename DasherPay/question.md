@@ -1,19 +1,7 @@
 Code Craft: Dasher Pay
 The canonical DoorDash Code Craft prompt. Given a chronological event stream for a dasher's day (orders ACCEPTED / FULFILLED / CANCELED with timestamps), compute the dasher's total pay. Pay accrues per minute that the dasher has at least one ongoing delivery; multiple concurrent orders typically multiply the per-minute rate. Production-style follow-ups dominate the second half of the round.
 
-SWE
-EM
-simulation
-interval
-state-machine
-json
-medium
-Frequency
-Very high
-Last asked
-2026-08-03
-Stage
-phone-screen · onsite-coding
+
 Requirements
 Input: a chronological list of events for a single dasher. Each event is roughly {order_id, dasher_id, timestamp, status} where status is one of ACCEPTED, FULFILLED, CANCELED. Exact input shape (JSON object, list of tuples, timestamp as int vs ISO-8601 string) is deliberately left for the candidate to clarify with the interviewer — this is part of the signal. Use a clean dataclass / struct.
 Output: the dasher's total pay for the day. Two flavors:
