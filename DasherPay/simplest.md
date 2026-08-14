@@ -126,6 +126,29 @@ We just find out when an order started and ended, loop through its minutes, and 
 ### The Ultra-Simple Approach
 
 ```java
+class PeakPeriod {
+    long startTimestamp;
+    long endTimestamp;
+    double rate;
+
+    public PeakPeriod(long startTimestamp, long endTimestamp, double rate) {
+        this.startTimestamp = startTimestamp;
+        this.endTimestamp = endTimestamp;
+        this.rate = rate;
+    }
+}
+
+// --- Downstream Service Interface ---
+
+interface PeakPeriodService {
+    /**
+     * Returns all peak periods overlapping with the given time window [start, end].
+     */
+    List<PeakPeriod> getPeakPeriods(long startTimestamp, long endTimestamp);
+}
+
+
+
 import java.util.*;
 
 public class DasherPayCalculator {
