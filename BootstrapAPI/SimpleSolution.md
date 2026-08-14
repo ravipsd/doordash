@@ -306,3 +306,79 @@ By introducing a strict dependency chain, the system's resilience profile shifts
 2. **Aggressive Caching is mandatory here.** To protect the critical path, the `UserService` response (mapping `user_id` to `consumer_id` and profile data) should be heavily cached in a low-latency store like Redis or Memcached. If the live User Service API times out after 250ms, the `.exceptionally()` fallback should instantly query Redis as a stale-read fallback, preventing the cascading failure of the Payments and Address services.
 
 
+To add exponential backoff without destroying your system's performance, the most critical rule is **never block the thread**. If you use `Thread.sleep()` inside a `CompletableFuture`, you will quickly exhaust your worker pool during an outage and cause a cascading failure.
+
+Because your original code uses `.orTimeout()` (introduced in Java 9), we can take advantage of modern Java concurrency features—specifically `CompletableFuture.delayedExecutor()` (Java 9) and `exceptionallyCompose()` (Java 12)—to build a completely non-blocking, recursive retry loop.
+
+Here is the production-ready rewrite:
+
+```java
+import java.util.Optional;
+import java.util.concurrent.*;
+
+public class ResilientClient {
+
+    // Assume this is injected or defined at the class level
+    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+
+    /**
+     * Primary entry point: Handles the overall timeout and final graceful degradation.
+     */
+    public <T> CompletableFuture<Optional<T>> fetchWithResilience(
+            Callable<T> call, String serviceName, long timeoutMs) {
+                
+        int maxRetries = 3;
+        long initialBackoffMs = 100L;
+
+        // Start the recursive retry engine
+        return executeWithRetry(call, serviceName, maxRetries, initialBackoffMs, 1)
+                // Global Timeout: If all retries combined exceed this limit, abort.
+                .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                // Final Fallback: If retries are exhausted OR the global timeout hits, degrade gracefully.
+                .exceptionally(ex -> {
+                    System.err.println(serviceName + " degraded completely: " + ex.getMessage());
+                    return Optional.empty();
+                });
+    }
+
+    /**
+     * Recursive async retry engine with exponential backoff.
+     */
+    private <T> CompletableFuture<Optional<T>> executeWithRetry(
+            Callable<T> call, String serviceName, int maxRetries, long backoffMs, int attempt) {
+                
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return Optional.ofNullable(call.call());
+            } catch (Exception e) {
+                // Wrap checked exceptions to trigger the exceptionallyCompose block
+                throw new CompletionException(e);
+            }
+        }, executor)
+        .exceptionallyCompose(ex -> {
+            // 1. Base Case: Stop retrying if we hit the limit
+            if (attempt >= maxRetries) {
+                System.err.println(serviceName + " failed permanently after " + attempt + " attempts.");
+                return CompletableFuture.failedFuture(ex); 
+            }
+
+            System.err.println(serviceName + " attempt " + attempt + " failed. Retrying in " + backoffMs + "ms...");
+
+            // 2. The Backoff: Create an executor that waits asynchronously (Non-blocking)
+            Executor delayedExecutor = CompletableFuture.delayedExecutor(backoffMs, TimeUnit.MILLISECONDS, executor);
+
+            // 3. The Recursion: Wait on the delayed executor, then trigger the next attempt
+            return CompletableFuture.supplyAsync(() -> null, delayedExecutor)
+                    .thenCompose(v -> executeWithRetry(call, serviceName, maxRetries, backoffMs * 2, attempt + 1));
+        });
+    }
+}
+
+```
+
+### Why this architecture stands out in an interview:
+
+1. **Purely Asynchronous Wait:** By using `CompletableFuture.delayedExecutor()`, the thread immediately returns to the `executor` pool while the backoff timer counts down. The thread is only consumed when the actual network call is happening.
+2. **`exceptionallyCompose`:** Older Java 8 code required ugly hacks to chain a new `CompletableFuture` after a failure. `exceptionallyCompose` acts just like `thenCompose`, but specifically routes the failure path back into a fresh asynchronous retry.
+3. **Global vs. Local Timeouts:** The structure separates the retry logic from the timeout logic. The `.orTimeout()` applies to the *entire chain* of events. If your initial call takes 2 seconds, and your backoff waits 1 second, a 2.5-second `timeoutMs` will successfully interrupt the whole process and trigger the final fallback, ensuring your frontend never hangs.
+
