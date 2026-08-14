@@ -113,3 +113,78 @@ public class DasherPayCalculator {
 
 * **Time Complexity**: **$O(N \log N)$** where **$N$** is the number of events. The bottleneck is sorting the event list. Sweeping through the array takes $O(N)$ time.
 * **Space Complexity**: **$O(K)$** where **$K$** is the maximum number of concurrent orders active at any single moment (for the `HashSet`). At worst, this is $O(N)$.
+
+
+Here is the absolute simplest way to think about this problem.
+
+**The "Aha!" Moment:** Because the prompt says *"Multiple concurrent orders typically multiply the per-minute rate"*, that means calculating 2 concurrent orders together is mathematically exactly the same as **calculating each order completely by itself and adding them together.**
+
+We don't need a timeline. We don't need to sort events. We don't need to track concurrent overlaps.
+
+We just find out when an order started and ended, loop through its minutes, and add the pay.
+
+### The Ultra-Simple Approach
+
+```java
+import java.util.*;
+
+public class DasherPayCalculator {
+
+    private final PeakPeriodService peakService;
+    private final double baseRate;
+
+    public DasherPayCalculator(PeakPeriodService peakService, double baseRate) {
+        this.peakService = peakService;
+        this.baseRate = baseRate;
+    }
+
+    public double calculateTotalPay(List<Event> events) {
+        if (events == null || events.isEmpty()) return 0.0;
+
+        // Fetch peaks for the whole shift duration at once
+        long shiftStart = events.stream().mapToLong(e -> e.timestamp).min().getAsLong();
+        long shiftEnd = events.stream().mapToLong(e -> e.timestamp).max().getAsLong();
+        List<PeakPeriod> peaks = peakService.getPeakPeriods(shiftStart, shiftEnd);
+
+        double totalPay = 0.0;
+        Map<String, Long> orderStartTimes = new HashMap<>();
+
+        // Process each event
+        for (Event event : events) {
+            if (event.status == OrderStatus.ACCEPTED) {
+                // Remember when this order started
+                orderStartTimes.put(event.orderId, event.timestamp);
+            } 
+            else { 
+                // Order is FULFILLED or CANCELED. We have a start and an end time.
+                long startMinute = orderStartTimes.remove(event.orderId);
+                long endMinute = event.timestamp;
+
+                // Calculate the pay for just this single order
+                for (long minute = startMinute; minute < endMinute; minute++) {
+                    totalPay += getRateForMinute(minute, peaks);
+                }
+            }
+        }
+
+        return totalPay;
+    }
+
+    private double getRateForMinute(long minute, List<PeakPeriod> peaks) {
+        double currentRate = baseRate;
+        for (PeakPeriod peak : peaks) {
+            if (minute >= peak.startTimestamp && minute < peak.endTimestamp) {
+                currentRate = Math.max(currentRate, peak.rate);
+            }
+        }
+        return currentRate;
+    }
+}
+
+```
+
+### Why this is the simplest version:
+
+1. **No Timeline Sorting:** We completely removed the `events.sort()` logic. We just process events in whatever order they come in to match `ACCEPTED` with `FULFILLED/CANCELED`.
+2. **No Concurrency State Tracking:** We don't care if 5 orders are happening at the same time. The `for` loop just processes Order 1's minutes, then processes Order 2's minutes independently.
+3. **Reads like English:** "When an order starts, save the time. When it ends, loop from the start time to the end time, looking up the rate for each minute and adding it to the total."

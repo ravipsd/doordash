@@ -145,3 +145,5 @@ Signals an interviewer is looking for. These are **dimensions to evaluate**, not
 ---
 
 Changes beyond formatting, so you can undo them if you'd rather stay verbatim: the downstream services became a table; the bare sub-headings under each Part (which had no body text in the original) became "Cover:" bullet lists; the clarifying questions and follow-ups got bolded lead-ins so they're scannable; the stray "state any further assumptions you make" line moved from the very bottom up into Constraints where it belongs. I also added the small ASCII dependency diagram — that's derived straight from the "note the dependency chain" paragraph, but it is new content rather than reformatting.
+
+
